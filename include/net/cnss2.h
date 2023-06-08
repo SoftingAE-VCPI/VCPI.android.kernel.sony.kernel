@@ -298,4 +298,7 @@ extern int cnss_get_pci_slot(struct device *dev);
 extern int cnss_pci_get_reg_dump(struct device *dev, uint8_t *buffer,
 				 uint32_t len);
 extern int cnss_set_wfc_mode(struct device *dev, struct cnss_wfc_cfg cfg);
+extern int cnss_update_time_sync_period(struct device *dev,
+					 uint32_t time_sync_period);
+extern int cnss_reset_time_sync_period(struct device *dev);
 #endif /* _NET_CNSS2_H */
