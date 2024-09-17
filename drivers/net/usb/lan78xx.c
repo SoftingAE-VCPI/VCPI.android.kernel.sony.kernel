@@ -2227,10 +2227,17 @@ static int lan78xx_phy_init(struct lan78xx_net *dev)
 	}
 
 	/* if phyirq is not set, use polling mode in phylib */
-	if (dev->domain_data.phyirq > 0)
-		phydev->irq = dev->domain_data.phyirq;
-	else
-		phydev->irq = PHY_POLL;
+	// if (dev->domain_data.phyirq > 0)
+	// 	phydev->irq = dev->domain_data.phyirq;
+	// else
+	// 	phydev->irq = PHY_POLL;
+
+	// softing 24.9.2024: Various problems with the PHY detection
+	// are leading to this workaround to put the driver into
+	// polling mode instead of having in interrupt mode
+	// This also causes the kernel to go into deadlock on akita.
+	// On kernel 5.15 there are additional changes in the phylib where threaded interrupts does not work properly
+	phydev->irq = PHY_POLL;
 	netdev_dbg(dev->net, "phydev->irq = %d\n", phydev->irq);
 
 	/* set to AUTOMDIX */
