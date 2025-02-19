@@ -31,8 +31,6 @@
 		sec,device_id = /bits/ 8 <0xAC 0x37 0x92>;
 
 		/* feature */
-		sec,watchdog_supported = <1>;
-		sec,watchdog_delay_ms = <10000>;
 		sec,side_touch_supported = <0>;
 		sec,glove_mode_supported = <0>;
 		sec,cover_mode_supported = <0>;
