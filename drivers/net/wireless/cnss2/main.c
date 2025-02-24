@@ -60,6 +60,7 @@
 #define CNSS_CAL_DB_FILE_NAME "wlfw_cal_db.bin"
 #define CNSS_CAL_START_PROBE_WAIT_RETRY_MAX 100
 #define CNSS_CAL_START_PROBE_WAIT_MS	500
+#define CNSS_TIME_SYNC_PERIOD_INVALID	0xFFFFFFFF
 
 enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
@@ -2875,6 +2876,26 @@ static ssize_t time_sync_period_show(struct device *dev,
 			plat_priv->ctrl_params.time_sync_period);
 }
 
+/**
+ * cnss_get_min_time_sync_period_by_vote() - Get minimum time sync period
+ * @plat_priv: Platform data structure
+ *
+ * Result: return minimum time sync period present in vote from wlan and sys
+ */
+uint32_t cnss_get_min_time_sync_period_by_vote(struct cnss_plat_data *plat_priv)
+{
+	unsigned int i, min_time_sync_period = CNSS_TIME_SYNC_PERIOD_INVALID;
+	unsigned int time_sync_period;
+
+	for (i = 0; i < TIME_SYNC_VOTE_MAX; i++) {
+		time_sync_period = plat_priv->ctrl_params.time_sync_period_vote[i];
+		if (min_time_sync_period > time_sync_period)
+			min_time_sync_period = time_sync_period;
+	}
+
+	return min_time_sync_period;
+}
+
 static ssize_t time_sync_period_store(struct device *dev,
 				      struct device_attribute *attr,
 				      const char *buf, size_t count)
@@ -2890,11 +2911,93 @@ static ssize_t time_sync_period_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	if (time_sync_period >= CNSS_MIN_TIME_SYNC_PERIOD)
-		cnss_bus_update_time_sync_period(plat_priv, time_sync_period);
+	if (time_sync_period < CNSS_MIN_TIME_SYNC_PERIOD) {
+		cnss_pr_err("Invalid time sync value\n");
+		return -EINVAL;
+	}
+	plat_priv->ctrl_params.time_sync_period_vote[TIME_SYNC_VOTE_CNSS] =
+		time_sync_period;
+	time_sync_period = cnss_get_min_time_sync_period_by_vote(plat_priv);
+
+	if (time_sync_period == CNSS_TIME_SYNC_PERIOD_INVALID) {
+		cnss_pr_err("Invalid min time sync value\n");
+		return -EINVAL;
+	}
+
+	cnss_bus_update_time_sync_period(plat_priv, time_sync_period);
 
 	return count;
 }
+
+/**
+ * cnss_update_time_sync_period() - Set time sync period given by driver
+ * @dev: device structure
+ * @time_sync_period: time sync period value
+ *
+ * Update time sync period vote of driver and set minimum of time sync period
+ * from stored vote through wlan and sys config
+ * Result: return 0 for success, error in case of invalid value and no dev
+ */
+int cnss_update_time_sync_period(struct device *dev, uint32_t time_sync_period)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	if (time_sync_period < CNSS_MIN_TIME_SYNC_PERIOD) {
+		cnss_pr_err("Invalid time sync value\n");
+		return -EINVAL;
+	}
+
+	plat_priv->ctrl_params.time_sync_period_vote[TIME_SYNC_VOTE_WLAN] =
+		time_sync_period;
+	time_sync_period = cnss_get_min_time_sync_period_by_vote(plat_priv);
+
+	if (time_sync_period == CNSS_TIME_SYNC_PERIOD_INVALID) {
+		cnss_pr_err("Invalid min time sync value\n");
+		return -EINVAL;
+	}
+
+	cnss_bus_update_time_sync_period(plat_priv, time_sync_period);
+	return 0;
+}
+EXPORT_SYMBOL(cnss_update_time_sync_period);
+
+/**
+ * cnss_reset_time_sync_period() - Reset time sync period
+ * @dev: device structure
+ *
+ * Update time sync period vote of driver as invalid
+ * and reset minimum of time sync period from
+ * stored vote through wlan and sys config
+ * Result: return 0 for success, error in case of no dev
+ */
+int cnss_reset_time_sync_period(struct device *dev)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+	unsigned int time_sync_period = 0;
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	/* Driver vote is set to invalid in case of reset
+	 * In this case, only vote valid to check is sys config
+	 */
+	plat_priv->ctrl_params.time_sync_period_vote[TIME_SYNC_VOTE_WLAN] =
+		CNSS_TIME_SYNC_PERIOD_INVALID;
+	time_sync_period = cnss_get_min_time_sync_period_by_vote(plat_priv);
+
+	if (time_sync_period == CNSS_TIME_SYNC_PERIOD_INVALID) {
+		cnss_pr_err("Invalid min time sync value\n");
+		return -EINVAL;
+	}
+
+	cnss_bus_update_time_sync_period(plat_priv, time_sync_period);
+
+	return 0;
+}
+EXPORT_SYMBOL(cnss_reset_time_sync_period);
 
 static ssize_t recovery_store(struct device *dev,
 			      struct device_attribute *attr,
@@ -2928,14 +3031,15 @@ static ssize_t shutdown_store(struct device *dev,
 {
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
 
+	cnss_pr_dbg("Received shutdown notification\n");
 	if (plat_priv) {
 		set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
+		cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
 		del_timer(&plat_priv->fw_boot_timer);
 		complete_all(&plat_priv->power_up_complete);
 		complete_all(&plat_priv->cal_complete);
+		cnss_pr_dbg("Shutdown notification handled\n");
 	}
-
-	cnss_pr_dbg("Received shutdown notification\n");
 
 	return count;
 }
@@ -3181,6 +3285,7 @@ static int cnss_reboot_notifier(struct notifier_block *nb,
 		container_of(nb, struct cnss_plat_data, reboot_nb);
 
 	set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
+	cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
 	del_timer(&plat_priv->fw_boot_timer);
 	complete_all(&plat_priv->power_up_complete);
 	complete_all(&plat_priv->cal_complete);
@@ -3251,6 +3356,14 @@ static void cnss_misc_deinit(struct cnss_plat_data *plat_priv)
 	wakeup_source_unregister(plat_priv->recovery_ws);
 }
 
+static void cnss_init_time_sync_period_default(struct cnss_plat_data *plat_priv)
+{
+	plat_priv->ctrl_params.time_sync_period_vote[TIME_SYNC_VOTE_WLAN] =
+		CNSS_TIME_SYNC_PERIOD_INVALID;
+	plat_priv->ctrl_params.time_sync_period_vote[TIME_SYNC_VOTE_CNSS] =
+		CNSS_TIME_SYNC_PERIOD_DEFAULT;
+}
+
 static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 {
 	plat_priv->ctrl_params.quirks = CNSS_QUIRKS_DEFAULT;
@@ -3264,6 +3377,7 @@ static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 	plat_priv->ctrl_params.qmi_timeout = CNSS_QMI_TIMEOUT_DEFAULT;
 	plat_priv->ctrl_params.bdf_type = CNSS_BDF_TYPE_DEFAULT;
 	plat_priv->ctrl_params.time_sync_period = CNSS_TIME_SYNC_PERIOD_DEFAULT;
+	cnss_init_time_sync_period_default(plat_priv);
 	/* Set adsp_pc_enabled default value to true as ADSP pc is always
 	 * enabled by default
 	 */
@@ -3334,6 +3448,26 @@ cnss_use_nv_mac(struct cnss_plat_data *plat_priv)
 	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
 				     "use-nv-mac");
 }
+
+int cnss_set_wfc_mode(struct device *dev, struct cnss_wfc_cfg cfg)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+	int ret = 0;
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	/* If IMS server is connected, return success without QMI send */
+	if (test_bit(CNSS_IMS_CONNECTED, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Ignore host request as IMS server is connected");
+		return ret;
+	}
+
+	ret = cnss_wlfw_send_host_wfc_call_status(plat_priv, cfg);
+
+	return ret;
+}
+EXPORT_SYMBOL(cnss_set_wfc_mode);
 
 static int cnss_probe(struct platform_device *plat_dev)
 {

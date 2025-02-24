@@ -2769,6 +2769,18 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 			    pci_priv->device_id);
 		return -ENODEV;
 	}
+
+	/* Assume only for those drivers provide chip version explicitly
+	 * need version check.
+	 */
+	if (driver_ops->chip_version != CNSS_CHIP_VER_ANY &&
+	    driver_ops->chip_version != plat_priv->device_version.major_version) {
+		cnss_pr_err("Driver built for chip ver 0x%x, enumerated ver 0x%x, reject unsupported driver\n",
+			    driver_ops->chip_version,
+			    plat_priv->device_version.major_version);
+		return -ENODEV;
+	}
+
 	set_bit(CNSS_DRIVER_REGISTER, &plat_priv->driver_state);
 
 	if (!plat_priv->cbc_enabled ||
@@ -4062,6 +4074,8 @@ int cnss_get_soc_info(struct device *dev, struct cnss_soc_info *info)
 	       sizeof(info->device_version));
 	memcpy(&info->dev_mem_info, &plat_priv->dev_mem_info,
 	       sizeof(info->dev_mem_info));
+	memcpy(&info->fw_build_id, &plat_priv->fw_build_id,
+	       sizeof(info->fw_build_id));
 
 	return 0;
 }
