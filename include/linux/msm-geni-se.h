@@ -74,6 +74,7 @@ struct se_geni_rsc {
 	unsigned int num_clk_levels;
 	unsigned long *clk_perf_tbl;
 	enum se_protocol_types proto;
+	bool is_added_to_list;
 };
 
 #define PINCTRL_DEFAULT	"default"
