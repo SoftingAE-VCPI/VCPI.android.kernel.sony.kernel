@@ -21,7 +21,7 @@ static u32 simplefb_x, simplefb_y;
 static u64 fb_base;
 static void *simplefb_fb;
 
-struct screen_info screen_info;
+struct screen_info _screen_info;
 
 static int __init simplefb_earlycon_remap_fb(void)
 {
@@ -29,7 +29,7 @@ static int __init simplefb_earlycon_remap_fb(void)
 	if (!earlycon_console || !(earlycon_console->flags & CON_ENABLED))
 		return 0;
 
-	simplefb_fb = memremap(fb_base, screen_info.lfb_size, MEMREMAP_WB);
+	simplefb_fb = memremap(fb_base, _screen_info.lfb_size, MEMREMAP_WB);
 
 	return simplefb_fb ? 0 : -ENOMEM;
 }
@@ -68,7 +68,7 @@ static void simplefb_earlycon_clear_scanline(unsigned int y)
 	unsigned long *dst;
 	u16 len;
 
-	len = screen_info.lfb_linelength;
+	len = _screen_info.lfb_linelength;
 	dst = simplefb_earlycon_map(y*len, len);
 	if (!dst)
 		return;
@@ -83,8 +83,8 @@ static void simplefb_earlycon_scroll_up(void)
 	u16 len;
 	u32 i, height;
 
-	len = screen_info.lfb_linelength;
-	height = screen_info.lfb_height;
+	len = _screen_info.lfb_linelength;
+	height = _screen_info.lfb_height;
 
 	for (i = 0; i < height - font->height; i++) {
 		dst = simplefb_earlycon_map(i*len, len);
@@ -134,7 +134,7 @@ simplefb_earlycon_write(struct console *con, const char *str, unsigned int num)
 	const char *s;
 	void *dst;
 
-	si = &screen_info;
+	si = &_screen_info;
 	len = si->lfb_linelength;
 
 	while (num) {
@@ -208,7 +208,7 @@ static int __init simplefb_earlycon_setup(struct earlycon_device *device,
 	u32 i;
 	int ret;
 
-	si = &screen_info;
+	si = &_screen_info;
 
 	if (!port->mapbase || !*device->options)
 		return -ENODEV;
