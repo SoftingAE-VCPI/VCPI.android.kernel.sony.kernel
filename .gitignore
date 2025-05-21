@@ -163,5 +163,9 @@ arch/*/configs/vendor/*_defconfig
 arch/arm64/boot/dts/vendor
 arch/arm/boot/dts/vendor
 
+# Submodules
+arch/arm64/configs/sony/
+drivers/staging/wlan-qc/
+
 # Documentation toolchain
 sphinx_*/
