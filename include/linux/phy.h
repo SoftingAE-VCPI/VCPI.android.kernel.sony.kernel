@@ -445,6 +445,7 @@ enum phy_state {
 	PHY_DOWN = 0,
 	PHY_READY,
 	PHY_HALTED,
+	PHY_ERROR,
 	PHY_UP,
 	PHY_RUNNING,
 	PHY_NOLINK,
