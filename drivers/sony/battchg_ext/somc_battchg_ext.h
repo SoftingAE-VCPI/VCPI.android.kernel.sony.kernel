@@ -138,6 +138,8 @@ struct somc_bcext_dev {
 	/* misc */
 	int				bootup_shutdown_phase;
 	int				product_code;
+	int				force_cc_open;
+	int				cc_forced_open;
 
 	/* wls_irq */
 	int				wls_irq;

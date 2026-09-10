@@ -466,11 +466,19 @@ static int somc_apply_thermal_mitigation(struct somc_bcext_dev *bcext_dev)
 									rc);
 
 	/*
-	 * BATTMNGR_SOMC_PROP_FORCE_CC_OPEN is never set other than thermal
-	 * mitigation, so use the property directly without votable.
+	 * BATTMNGR_SOMC_PROP_FORCE_CC_OPEN is set by thermal mitigation,
+	 * or kept forced open if force_cc_open is active.
 	 */
-	somc_bcext_set_prop(bcext_dev, BATTMNGR_SOMC_PROP_FORCE_CC_OPEN,
-					(u32)current_therm_mitig->usb_cc_open);
+	{
+		u32 target_cc_open = (u32)current_therm_mitig->usb_cc_open;
+
+		if (bcext_dev->force_cc_open)
+			target_cc_open = 1;
+
+		somc_bcext_set_prop(bcext_dev, BATTMNGR_SOMC_PROP_FORCE_CC_OPEN,
+						target_cc_open);
+		bcext_dev->cc_forced_open = target_cc_open;
+	}
 
 	return rc;
 }
@@ -1493,6 +1501,51 @@ static ssize_t usb_cc_open_status_show(struct class *c,
 }
 static CLASS_ATTR_RO(usb_cc_open_status);
 
+static ssize_t force_cc_open_show(struct class *c,
+					struct class_attribute *attr, char *buf)
+{
+	struct somc_bcext_dev *bcext_dev = container_of(c,
+					struct somc_bcext_dev, bcext_class);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", bcext_dev->force_cc_open);
+}
+
+static ssize_t force_cc_open_store(struct class *c,
+		struct class_attribute *attr, const char *buf, size_t count)
+{
+	struct somc_bcext_dev *bcext_dev = container_of(c,
+					struct somc_bcext_dev, bcext_class);
+	int val;
+
+	if (kstrtoint(buf, 0, &val))
+		return -EINVAL;
+
+	if (val != 0 && val != 1)
+		return -EINVAL;
+
+	if (bcext_dev->force_cc_open == val)
+		return count;
+
+	bcext_dev->force_cc_open = val;
+
+	if (val) {
+		pr_info("somc_bcext: force_cc_open set to 1 (forcing CC open)\n");
+		somc_bcext_set_prop(bcext_dev, BATTMNGR_SOMC_PROP_FORCE_CC_OPEN, 1);
+		bcext_dev->cc_forced_open = 1;
+	} else {
+		/* Restore default: close CC unless thermal mitigation requires it */
+		u32 therm_cc_open = (bcext_dev->therm_level <= MAX_THERM_LEVEL) ?
+			(u32)bcext_dev->therm_mitig[bcext_dev->therm_level].usb_cc_open : 0;
+
+		pr_info("somc_bcext: force_cc_open set to 0 (restoring CC to %u)\n", therm_cc_open);
+		somc_bcext_set_prop(bcext_dev, BATTMNGR_SOMC_PROP_FORCE_CC_OPEN, therm_cc_open);
+		bcext_dev->cc_forced_open = therm_cc_open;
+	}
+
+	return count;
+}
+static CLASS_ATTR_RW(force_cc_open);
+
 static ssize_t real_temp_store(struct class *c, struct class_attribute *attr,
 						const char *buf, size_t count)
 {
@@ -2188,6 +2241,7 @@ static struct attribute *somc_bcext_class_attrs[] = {
 	&class_attr_system_temp_level.attr,
 	&class_attr_system_temp_level_max.attr,
 	&class_attr_usb_cc_open_status.attr,
+	&class_attr_force_cc_open.attr,
 	&class_attr_wls_cmd_reg_addr.attr,
 	&class_attr_wls_cmd_reg_data.attr,
 	&class_attr_batt_soc.attr,
@@ -2319,6 +2373,13 @@ static int somc_bcext_psy_notifier_cb(struct notifier_block *nb,
 				cancel_delayed_work_sync(
 					&bcext_dev->offchg_termination_work);
 		}
+	}
+
+	if (bcext_dev->force_cc_open && (bcext_dev->usb_online || bcext_dev->wireless_online)) {
+		/* Safety net: if external power connects, restore CC */
+		bcext_dev->force_cc_open = 0;
+		somc_bcext_set_prop(bcext_dev, BATTMNGR_SOMC_PROP_FORCE_CC_OPEN, 0);
+		bcext_dev->cc_forced_open = 0;
 	}
 
 	return NOTIFY_OK;
