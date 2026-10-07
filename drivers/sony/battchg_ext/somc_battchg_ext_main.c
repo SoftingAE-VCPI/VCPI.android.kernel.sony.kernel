@@ -532,6 +532,8 @@ static ssize_t batt_id_show(struct class *c, struct class_attribute *attr,
 }
 static CLASS_ATTR_RO(batt_id);
 
+extern int pm8350b_set_usb_suspend(bool suspend);
+
 static ssize_t usb_input_suspend_store(struct class *c,
 		struct class_attribute *attr, const char *buf, size_t count)
 {
@@ -539,7 +541,6 @@ static ssize_t usb_input_suspend_store(struct class *c,
 					struct somc_bcext_dev, bcext_class);
 	int val;
 	bool enabled;
-	int rc;
 
 	if (kstrtoint(buf, 10, &val))
 		return -EINVAL;
@@ -551,9 +552,10 @@ static ssize_t usb_input_suspend_store(struct class *c,
 	else
 		return -EINVAL;
 
-	rc = vote(bcext_dev->usb_icl_votable, USER_SUSPEND_VOTER, enabled, 0);
-	if (rc < 0)
-		return -EINVAL;
+	if (bcext_dev->usb_icl_votable)
+		vote(bcext_dev->usb_icl_votable, USER_SUSPEND_VOTER, enabled, 0);
+
+	pm8350b_set_usb_suspend(enabled);
 
 	return count;
 }
@@ -2295,6 +2297,7 @@ static int somc_bcext_psy_notifier_cb(struct notifier_block *nb,
 			pr_err("Couldn't get online rc = %d\n", rc);
 		else
 			bcext_dev->usb_online = prop.intval;
+
 	}
 	else if (strcmp(psy->desc->name, "wireless") == 0) {
 		rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_ONLINE,

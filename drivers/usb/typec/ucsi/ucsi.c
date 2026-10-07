@@ -17,6 +17,36 @@
 #include "ucsi.h"
 #include "trace.h"
 
+#include <linux/usb/typec_ucsi.h>
+
+static const struct ucsi_power_ops *ucsi_pwr_ops;
+
+void ucsi_register_power_ops(const struct ucsi_power_ops *ops)
+{
+	ucsi_pwr_ops = ops;
+}
+EXPORT_SYMBOL_GPL(ucsi_register_power_ops);
+
+void ucsi_unregister_power_ops(void)
+{
+	ucsi_pwr_ops = NULL;
+}
+EXPORT_SYMBOL_GPL(ucsi_unregister_power_ops);
+
+static inline void ucsi_disable_otg(void)
+{
+	if (ucsi_pwr_ops && ucsi_pwr_ops->disable_otg)
+		ucsi_pwr_ops->disable_otg();
+}
+
+static inline void ucsi_enable_otg(void)
+{
+	if (ucsi_pwr_ops && ucsi_pwr_ops->enable_otg)
+		ucsi_pwr_ops->enable_otg();
+}
+
+
+
 /*
  * UCSI_TIMEOUT_MS - PPM communication timeout
  *
@@ -777,6 +807,21 @@ static void ucsi_handle_connector_change(struct work_struct *work)
 	    con->status.change & UCSI_CONSTAT_POWER_LEVEL_CHANGE) {
 		ucsi_pwr_opmode_change(con);
 		ucsi_port_psy_changed(con);
+		if (ucsi_pwr_ops && ucsi_pwr_ops->is_power_supplied) {
+			if (ucsi_pwr_ops->is_power_supplied() > 0) {
+				pr_info("ucsi_handle_connector_change: is_power_supplied=true -> enable TRY.SNK\n");
+				ucsi_enable_otg();
+				if (usb_role_switch_get_role(con->usb_role_sw) == USB_ROLE_HOST) {
+					pr_info("ucsi_handle_connector_change: USB host role is already HOST, trigger NONE -> HOST\n");
+					usb_role_switch_set_role(con->usb_role_sw, USB_ROLE_NONE);
+					msleep(150);
+					usb_role_switch_set_role(con->usb_role_sw, USB_ROLE_HOST);
+				}
+			} else {
+				pr_info("ucsi_handle_connector_change: is_power_supplied=false -> enable SNK_ONLY\n");
+				ucsi_disable_otg();
+			}
+		}
 	}
 
 	if (con->status.change & UCSI_CONSTAT_POWER_DIR_CHANGE) {
