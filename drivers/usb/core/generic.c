@@ -235,12 +235,47 @@ int usb_generic_driver_probe(struct usb_device *udev)
 	else {
 		c = usb_choose_configuration(udev);
 		if (c >= 0) {
-			err = usb_set_configuration(udev, c);
-			if (err && err != -ENODEV) {
-				dev_err(&udev->dev, "can't set config #%d, error %d\n",
-					c, err);
-				/* This need not be fatal.  The user can try to
-				 * set other configurations. */
+			/* it looks like our HUB is unreliable and it occasionally throws EPROTO errors during usb_set_configuration 
+			 * so retry only when actual usb device fails to setup config. */
+			if (udev->descriptor.bDeviceClass != USB_CLASS_HUB) {
+				unsigned int delay_ms = 50;
+				int retries = 10;
+				int attempt;
+
+				for (attempt = 0; attempt <= retries; attempt++) {
+					err = usb_set_configuration(udev, c);
+					if (!err)
+						break;
+
+					/* Non-retriable errors: device gone or not connected */
+					if (err == -ENODEV || err == -ENOENT)
+						break;
+
+					if (attempt < retries) {
+						dev_err(&udev->dev,
+							"usb_generic_driver_probe: can't set config #%d, error %d "
+							"(attempt %d/%d, retrying in %ums)\n",
+							c, err, attempt + 1, retries,
+							delay_ms);
+						msleep(delay_ms);
+						delay_ms = min(delay_ms * 2, 2000U);
+					}
+				}
+
+				if (err && err != -ENODEV) {
+					dev_err(&udev->dev,
+						"usb_generic_driver_probe: can't set config #%d, error %d "
+						"(failed after %d attempts)\n",
+						c, err, attempt);
+					/* This need not be fatal.  The user can try to
+					 * set other configurations. */
+				}
+			} else {
+				err = usb_set_configuration(udev, c);
+				if (err && err != -ENODEV)
+					dev_err(&udev->dev,
+						"usb_generic_driver_probe: can't set config #%d, error %d\n",
+						c, err);
 			}
 		}
 	}

@@ -2661,10 +2661,35 @@ int usb_authorize_device(struct usb_device *usb_dev)
 	 */
 	c = usb_choose_configuration(usb_dev);
 	if (c >= 0) {
-		result = usb_set_configuration(usb_dev, c);
+		unsigned int delay_ms = 50;
+		int retries = 10;
+		int attempt;
+
+		for (attempt = 0; attempt <= retries; attempt++) {
+			result = usb_set_configuration(usb_dev, c);
+			if (!result)
+				break;
+
+			/* Non-retriable errors: device gone or not connected */
+			if (result == -ENODEV || result == -ENOENT)
+				break;
+
+			if (attempt < retries) {
+				dev_warn(&usb_dev->dev,
+					"can't set config #%d, error %d "
+					"(attempt %d/%d, retrying in %ums)\n",
+					c, result, attempt + 1, retries,
+					delay_ms);
+				msleep(delay_ms);
+				delay_ms = min(delay_ms * 2, 2000U);
+			}
+		}
+
 		if (result) {
 			dev_err(&usb_dev->dev,
-				"can't set config #%d, error %d\n", c, result);
+				"can't set config #%d, error %d "
+				"(failed after %d attempts)\n",
+				c, result, attempt);
 			/* This need not be fatal.  The user can try to
 			 * set other configurations. */
 		}
